@@ -1,0 +1,13 @@
+../Core/Src/net_w5500.c:26:20:wizchip_select	8	static
+../Core/Src/net_w5500.c:31:20:wizchip_deselect	8	static
+../Core/Src/net_w5500.c:36:16:wizchip_read	24	static
+../Core/Src/net_w5500.c:43:13:wizchip_write	32	static
+../Core/Src/net_w5500.c:49:13:wizchip_readburst	16	static
+../Core/Src/net_w5500.c:54:13:wizchip_writeburst	16	static
+../Core/Src/net_w5500.c:59:13:wizchip_hw_reset	8	static
+../Core/Src/net_w5500.c:69:5:w5500_chip_init	32	static
+../Core/Src/net_w5500.c:123:6:net_print_info	152	static
+../Core/Src/net_w5500.c:137:20:dhcp_tick_if_needed	24	static
+../Core/Src/net_w5500.c:146:6:ethernet_start	24	static
+../Core/Src/net_w5500.c:195:6:tcp_echo_task	1048	static
+../Core/Src/net_w5500.c:252:6:net_w5500_irq_handler	16	static
