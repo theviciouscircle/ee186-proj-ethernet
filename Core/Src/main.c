@@ -88,48 +88,10 @@ static uint8_t spi_txrx1(uint8_t v) {
   return rx;
 }
 
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
-  if (GPIO_Pin == W5500_INT_Pin) {
-    net_w5500_irq_handler();
-  }
-}
-
-//uint8_t W5500_ReadVersion(void) {
-//  const uint8_t addr_hi = 0x00;
-//  const uint8_t addr_lo = 0x39;     // VERSIONR
-//  const uint8_t control = 0x00      // [BSB=0:Common]
-//                         | 0x00     // OM=00 (var len)
-//                         | 0x00     // (bits 3..1)
-//                         | 0x00;    // RWB=0?  -> NOTE: For read, RWB=1
-//  // Proper control for READ, Common block, variable length:
-//  const uint8_t CTRL_READ_COMMON_VAR = 0x00 | (0 << 3) | (0 << 1) | 0x01; // RWB=1
-//
-//  uint8_t ver;
-//  W5500_Select();
-//  spi_txrx1(addr_hi);
-//  spi_txrx1(addr_lo);
-//  spi_txrx1(CTRL_READ_COMMON_VAR);
-//  ver = spi_txrx1(0x00);
-//  W5500_Deselect();
-//  return ver;
-//}
-//#define W5500_CTRL_READ(bsb)  (((bsb) << 3) | (0 << 2) | 0x00) // RWB=0, OM=00
-//#define W5500_BSB_COMMON      0x00
-//#define W5500_VERSIONR        0x0039
-//
-//uint8_t w5500_read_reg(uint16_t addr, uint8_t bsb) {
-//    uint8_t hdr[3] = { (uint8_t)(addr >> 8), (uint8_t)addr, W5500_CTRL_READ(bsb) };
-//    uint8_t val = 0x00;
-//
-//    W5500_Select();
-//    HAL_SPI_Transmit(&hspi1, hdr, 3, HAL_MAX_DELAY);
-//    HAL_SPI_Receive(&hspi1, &val, 1, HAL_MAX_DELAY);
-//    W5500_Deselect();
-//    return val;
-//}
-//
-//uint8_t W5500_ReadVersion(void) {
-//    return w5500_read_reg(W5500_VERSIONR, W5500_BSB_COMMON);
+//void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
+//  if (GPIO_Pin == W5500_INT_Pin) {
+//    net_w5500_irq_handler();
+//  }
 //}
 
 uint8_t W5500_ReadVersion(void) {
@@ -186,44 +148,50 @@ int main(void)
   MX_LPUART1_UART_Init();
   /* USER CODE BEGIN 2 */
 
+  ethernet_start();                   // DHCP → static fallback
+  net_start_server(NET_SERVER_PORT);  // default 5000
 
-  HAL_Delay(50); // Keep low for at least 500us
-  HAL_GPIO_WritePin(W5500_RST_GPIO_Port, W5500_RST_Pin, GPIO_PIN_RESET);
-  HAL_Delay(50); // Keep low for at least 500us
-  HAL_GPIO_WritePin(W5500_RST_GPIO_Port, W5500_RST_Pin, GPIO_PIN_SET);
-  HAL_Delay(500); // Allow time for W5500 PLL to lock
+  printf("nc -v <ip> %u\r\n", NET_SERVER_PORT);
+  printf("nc -v <ip> 5000   (type lines, press Enter)\r\n");
 
-
-  W5500_Select();
-  spi_txrx1(0x00); // Addr High
-  spi_txrx1(0x01); // Addr Low (GAR0)
-  spi_txrx1(0x04); // Control: Common, WRITE, VDM (00000 1 00 -> 0x04)
-  spi_txrx1(0xAB); // Write data
-  W5500_Deselect();
-
-  HAL_Delay(10);
-
-  // TEST: Read it back
-  uint8_t test_val;
-  W5500_Select();
-  spi_txrx1(0x00); // Addr High
-  spi_txrx1(0x01); // Addr Low (GAR0)
-  spi_txrx1(0x00); // Control: Common, READ, VDM
-  test_val = spi_txrx1(0x00); // Clock data in
-  W5500_Deselect();
-
-  printf("Test Read: 0x%02X (expected 0xAB)\r\n", test_val);
-  printf("W5500 ver: 0x%02X\r\n", W5500_ReadVersion());
-
-
-//  printf("W5500 ver: 0x%02X\r\n", W5500_ReadVersion());
-
-  ethernet_start();            // DHCP → static fallback
-  printf("Echo server on :5000\r\n");
+  int last_connected = 0;
+  uint32_t last_tick = 0;
 
   for (;;) {
-    tcp_echo_task();           // keep it spinning
-    HAL_Delay(1);              // tiny yield
+	// keep the socket serviced
+	net_poll();
+
+	// verify connection status
+	int connected = net_is_connected();
+
+    // Send a one-time greeting right after a client connects
+    if (connected && !last_connected) {
+      printf("Connected!\n");
+      net_send_str("Hello from Nucleo! Type something and press Enter; I'll echo ACK.");
+    }
+
+    // Example: send a periodic message every 1s while connected
+    uint32_t now = HAL_GetTick();
+    if (connected && (now - last_tick) >= 1000) {
+      char buf[64];
+      snprintf(buf, sizeof buf, "tick %lu ms\n", (unsigned long)now);
+      net_send_str(buf);
+      last_tick = now;
+    }
+
+    char line[256];
+    int n = net_recv_line(line, sizeof line, 0);  // non-blocking
+    if (n > 0) {
+      HAL_UART_Transmit(&hlpuart1, (uint8_t*)"RX: ", 4, HAL_MAX_DELAY);
+      HAL_UART_Transmit(&hlpuart1, (uint8_t*)line, n, HAL_MAX_DELAY);
+      HAL_UART_Transmit(&hlpuart1, (uint8_t*)"\n", 1, HAL_MAX_DELAY);
+
+      net_send_str("ACK: ");
+      net_send_str(line);
+      net_send_str("\n");
+    }
+
+    last_connected = connected;
   }
 
   /* USER CODE END 2 */
@@ -354,7 +322,7 @@ static void MX_SPI1_Init(void)
   hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
   hspi1.Init.NSS = SPI_NSS_SOFT;
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_256;
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_4;
   hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
@@ -366,11 +334,7 @@ static void MX_SPI1_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN SPI1_Init 2 */
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_256;
-  if (HAL_SPI_Init(&hspi1) != HAL_OK)
-  {
-    Error_Handler();
-  }
+
   /* USER CODE END SPI1_Init 2 */
 
 }
@@ -637,7 +601,6 @@ static void MX_GPIO_Init(void)
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
-
   // MARK- my code
   // configure PA5/6/7 for SPI
   GPIO_InitStruct.Pin = GPIO_PIN_5 | GPIO_PIN_6 | GPIO_PIN_7;
@@ -646,6 +609,7 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
   GPIO_InitStruct.Alternate = GPIO_AF5_SPI1;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
   /* USER CODE END MX_GPIO_Init_2 */
 }
 
